@@ -1,0 +1,5 @@
+#! /bin/sh
+cd /home/john/Dropbox/Writing/Software/Go/src/snp
+go build snp.go
+cd -
+snp -k='both' -t='false'

@@ -485,9 +485,9 @@ func pop(stack []string) {
 func processLines(lines []string) {
 
 	// Set up regular expressions for line parsing
-	match_string := "([^\\" + o.bold + "]+)"
-	bold_re := "\\" + o.bold + "{2}" + match_string + "\\" + o.bold + "{2}"
-	ital_re := "\\" + o.bold + "{1}" + match_string + "\\" + o.bold + "{1}"
+	match_string := `([^\` + o.bold + `]+)`
+	bold_re := `\` + o.bold + `{2}` + match_string + `\` + o.bold + `{2}`
+	ital_re := `\` + o.bold + `{1}` + match_string + `\` + o.bold + `{1}`
 
 	// Markdown processing
 	// Emphasis
@@ -579,7 +579,8 @@ func processLines(lines []string) {
 			// is, remove it and substitute PDF for
 			// TeX. But what if I really want to include a
 			// PNG?
-			line = regexp.MustCompile(`.svg`).ReplaceAllString(line, ".png")
+			line = regexp.MustCompile(`\.svg`).ReplaceAllString(line, ".pdf")
+			fmt.Println(line)
 			found = true
 		}
 		
