@@ -295,7 +295,7 @@ func main() {
 	}
 
 	if !notes_MD {
-		fmt.Printf("Pandoc encountered and error")
+		error("Pandoc encountered an error!", "Bugger")
 	}
 
 
@@ -1393,7 +1393,7 @@ func runProg(p string, a []string) bool {
 			info("Parameter to runProg p (program) is: " + p)
 			info("Parameter to runProg a (arg) is: " + strings.Join(a, " "))
 			fmt.Println("error message is: ", err)
-			fmt.Println("error info:", fmt.Sprint(err)+"\nStd out: "+string(output)[0:200])
+			fmt.Println("error info:", fmt.Sprint(err)+"\nStd out: "+string(output))
 		}
 		return false
 	} else {
