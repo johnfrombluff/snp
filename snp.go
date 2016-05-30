@@ -191,6 +191,8 @@ var totalSize uint64
 var whichToKeep string
 var printSizes bool
 var run_TeX bool
+var del_TeX bool
+var leave_alone bool
 var fileSizes map[string]uint64
 var ErrorText string
 var confLocation string
@@ -223,42 +225,41 @@ func main() {
 	s := make(chan bool)
 	m := make(chan bool)
 
-	info("====> Input processed <====")		
+	//info("====> Input processed <====")
 	go writeNotes(filename, n)
 	go writeSlides(filename, s)
 	go writeMD(filename, m)
-	
+
 	notes := <-n
 	slides := <-s
-	notes_MD := <- m
-	
+	notes_MD := <-m
+
 	if notes == false || slides == false {
 		debug("The LaTeX files have not been deleted.")
 	} else {
-		switch whichToKeep {
-		case "none":
-			if notes && slides {
-				cleanUp(o.NotesFileName +
-					" " + o.SlidesFileName)
-				info("All LaTeX files deleted.")
-			} else {
-				info("Because pdflatex did not complete" +
-					" sucessfully, I didn't delete the " +
-					"*.tex files.")
-			}
-
-		case "notes":
-			cleanUp(o.SlidesFileName)
-			info("LaTeX slides files deleted.")
-		case "slides":
-			cleanUp(o.NotesFileName)
-			info("LaTeX notes files deleted")
-		case "both":
-			info("LaTeX files for notes and slides are available.")
-		default:
-			info("Can't understand which files to keep." +
-				" ('" + whichToKeep + "')")
+		//switch whichToKeep {
+		if ! del_TeX {
+			//case "none":
+			//	if notes && slides {
+			cleanUp(o.NotesFileName +
+				" " + o.SlidesFileName)
+			info("\nTeX files deleted")
+		} else {
+			info("\nTeX files not deleted")
 		}
+
+		//case "notes":
+		//	cleanUp(o.SlidesFileName)
+		//	info("LaTeX slides files deleted.")
+		//case "slides":
+		//	cleanUp(o.NotesFileName)
+		//	info("LaTeX notes files deleted")
+		//case "both":
+		//	debug("LaTeX files for notes and slides are available.")
+		//default:
+		//	info("Can't understand which files to keep." +
+		//		" ('" + whichToKeep + "')")
+		//}
 	}
 	if notes && slides {
 		info(fmt.Sprintf("All done: %d slides produced. Ciao!",
@@ -298,7 +299,6 @@ func main() {
 		error("Pandoc encountered an error!", "Bugger")
 	}
 
-
 }
 
 func init() {
@@ -308,6 +308,7 @@ func init() {
 	in_table = false
 	list_type = ""
 	pure_MD = true
+	leave_alone = false
 
 	envStack = make([]string, 7) //FIXME: allows nesting up to
 	//seven environments. Can I make this a dynamic stack, as
@@ -327,19 +328,20 @@ func init() {
 	confLocation = "/home/john/Dropbox/Writing/snp/"
 	confFile = "snp.ini"
 
-	const (
-		defaultKeep = "none"
-		usageKeep   = "Which TeX file to keep (i.e. not delete).\n" +
-			" Valid values are 'none' (the default)," +
-			"'both', 'notes' and 'slides'"
-	)
-	flag.StringVar(&whichToKeep, "keep", defaultKeep, usageKeep)
-	flag.StringVar(&whichToKeep, "k", defaultKeep,
-		usageKeep+"\n(-k is shorthand for -keep)")
+	//const (
+	//		defaultKeep = "none"
+	//		usageKeep   = "Which TeX file to keep (i.e. not delete).\n" +
+	//			" Valid values are 'none' (the default)," +
+	//			"'both', 'notes' and 'slides'"
+	//	)
+	//	flag.StringVar(&whichToKeep, "keep", defaultKeep, usageKeep)
+	//	flag.StringVar(&whichToKeep, "k", defaultKeep,
+	//		usageKeep+"\n(-k is shorthand for -keep)")
 
 	flag.IntVar(&Debug, "d", 0, "Turn debugging output on")
 	flag.BoolVar(&printSizes, "s", false, "Print size of included files")
-	flag.BoolVar(&run_TeX, "t", true, "Print size of included files")
+	flag.BoolVar(&run_TeX, "t", true, "Run TeX")
+	flag.BoolVar(&del_TeX, "k", false, "Do not delete TeX files after processing them")
 }
 
 func term(s string, style int, fg int, bg int) string {
@@ -387,7 +389,6 @@ func checkArgs(o *Options) (string, uint64) {
 	filename := ""
 
 	if len(flag.Args()) < 1 {
-		// FIXME: Or, search for a /single/ file with extension *.sn.  Neato!
 		dirname, err := os.Getwd()
 		d, err := os.Open(dirname)
 		files, err := d.Readdir(-1)
@@ -483,44 +484,17 @@ func pop(stack []string) {
 *                                                                              *
 *******************************************************************************/
 func processLines(lines []string) {
-
-	// Set up regular expressions for line parsing
-	match_string := `([^\` + o.bold + `]+)`
-	bold_re := `\` + o.bold + `{2}` + match_string + `\` + o.bold + `{2}`
-	ital_re := `\` + o.bold + `{1}` + match_string + `\` + o.bold + `{1}`
-
-	// Markdown processing
-	// Emphasis
-	re_b := regexp.MustCompile(bold_re) // Bold
-	re_i := regexp.MustCompile(ital_re) // italics
-
-
-	// Links, URIs and images. FIXME: deal with ) in URI
-	re_g := regexp.MustCompile(`!\[(?P<text>[^\]]*)\](\((?P<path>[^\)]+)\))*(\{(?P<arguments>[^\}]*)\))*`) // graphics
-	// source: http://daringfireball.net/2010/07/improved_regex_for_matching_urls
-	re_uri := `(?i)\b((?:[a-z][\w-]+:(?:/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s!()\[\]{};:'",<>?«»“”‘’]))`
-
-	re_h := regexp.MustCompile(`\[(?P<text>[^\]]+)\]\((?P<uri>` + re_uri + `)\)`) // link
-
-	// Citations
-	re_p := regexp.MustCompile(`\[(?P<prefix>[^@]*)(?P<key>(@[^\[]+);*)+\s*(?P<suffix>[^\]]*)\]`) // Parenthesised citation
-	re_t := regexp.MustCompile(`@(?P<key>[\w\.]+)\s{0,1}(\[(?P<suffix>[^\}]+)\])*`)                //in-text citation
-
-	// Detect indentation
-	re_4 := regexp.MustCompile("^\\s{4,}(\\-|1\\.)") //at least four spaces at the start of a line, followed by a -
-
-	re_keyval := regexp.MustCompile(`(?P<key>\w+)\=(?P<value>[^,]+)`)
-	re_bogus := regexp.MustCompile(`align=center`)
-	found := false
 	// Read each line and search for switches
 	// FIXME: move MD processing to a separate function
 	for i := range lines {
 		line_number++
 		line := lines[i]
-		
-		// detect TeX markup	
-		if regexp.MustCompile(`\\\w+`).FindStringIndex(line) != nil {
-			if (Debug > -1 ) {
+
+		// detect TeX markup
+		re_slash := regexp.MustCompile(`\\\w+`)
+		re_math := regexp.MustCompile(re_delim("$"))
+		if (re_slash.FindStringIndex(line) != nil) || (re_math.FindStringIndex(line) != nil) {
+			if Debug > -1 {
 				debug("(" + strconv.Itoa(line_number) + ") Found TeX markup: " + line)
 			}
 			pure_MD = false
@@ -531,82 +505,9 @@ func processLines(lines []string) {
 		}
 
 		// Save the MD input, then make the line safe for TeX, and translate
-		// some character sequences to TeX.  
+		// some character sequences to TeX.
 		md_line = line
-		line = smart_punc(line)
-
-		// Scan line for Markdown markup
-		if re_b.FindStringIndex(line) != nil {
-			line = re_b.ReplaceAllString(line, "\\textbf{$1}")
-			found = true
-		}
-		if re_i.FindStringIndex(line) != nil {
-			line = re_i.ReplaceAllString(line, "\\textit{$1}")
-			found = true
-		}
-		if re_h.FindStringIndex(line) != nil {
-			line = re_h.ReplaceAllString(line, "\\href{$uri}{$text}")
-			found = true
-		}
-		
-		// Process graphics links
-		if re_g.FindStringIndex(line) != nil {
-			// \\begin{center}\n  \\end{center}\n"
-			// FIXME: I need to remove invalid argument for includegraphics
-			md := map[string]string{}
-			n1 := re_g.SubexpNames()
-			r1 := re_g.FindAllStringSubmatch(line, -1)[0]
-			for i, n := range r1 {
-				if n1[i] == "arguments" && n != "" {
-					r2 := re_keyval.FindAllStringSubmatch(n, -1)
-					for _, pair := range r2 {
-						key := pair[1]
-						value := pair[2]
-						if key == "align" && value == "center" {
-							//info("Auto-centering")
-							//info("before: " + line)
-							line = re_bogus.ReplaceAllString(line, "")
-							//info("after: " + line)
-							pushEnv("center", "")
-						}
-
-					}
-				}
-				md[n1[i]] = n
-			}
-			line = re_g.ReplaceAllString(line, "\n\\includegraphics[$arguments]{$path}\n")
-			// FIXME: Dirty hack. Whatever the extension
-			// is, remove it and substitute PDF for
-			// TeX. But what if I really want to include a
-			// PNG?
-			line = regexp.MustCompile(`\.svg`).ReplaceAllString(line, ".pdf")
-			fmt.Println(line)
-			found = true
-		}
-		
-		processTables(line)
-		
-		if re_p.FindStringIndex(line) != nil {
-			cites := parseCitations(line)
-			line = re_p.ReplaceAllString(line, "\\citep[$prefix][$suffix]{"+cites+"}")
-			o.hasCitations = true
-			found = true
-		} else {
-			if re_t.FindStringIndex(line) != nil {
-				cites := parseCitations(line)
-				line = re_t.ReplaceAllString(line, "\\citet[$suffix]{"+cites+"}")
-				o.hasCitations = true
-				found = true
-			}
-		}
-
-		if found {
-			if Debug > 0 {
-				fmt.Println("Formatted line:   " + line)
-			}
-			found = false
-		}
-		// End Markdown scanning
+		line = process_md(line)
 
 		// Split the line at the first space
 		keys := strings.SplitN(line, " ", 2)
@@ -665,6 +566,10 @@ func processLines(lines []string) {
 			}
 			popEnvs()
 			pushEnv("section", v)
+		case "[bv]":
+			leave_alone = true
+		case "[ev]":
+			leave_alone = false
 		case "[soh]":
 			SlidesOnly = true
 			pushEnv("section", v)
@@ -738,7 +643,7 @@ func processLines(lines []string) {
 			o.TeXPreambleCommon += "\n" + v
 		case "tcb":
 			tc("begin", v)
-			if (Debug > -1 ) {
+			if Debug > -1 {
 				info("Found TeX-specific SN code (tc)")
 			}
 		case "tce":
@@ -757,18 +662,18 @@ func processLines(lines []string) {
 				//reconstruct the bogus colspec
 				cols := regexp.MustCompile(`\|`).FindAllStringSubmatch(md_line, -1)
 				cols_n := len(cols) + 1
-				colspec := makeColspec(cols)
-				info( "colspec: " + colspec)
+				//colspec := makeColspec(cols)
+				//debug("colspec: " + colspec)
 				info("Found " + strconv.Itoa(cols_n) + " columns in a pipe table")
-				markdownLines = append(markdownLines, md_line + "\n")
+				markdownLines = append(markdownLines, md_line+"\n")
 			}
 		case "#%":
 		default: // could be blank or indented
-			if ( line_number == 5002 ){
-				info("\n\n"+strconv.Itoa(line_number) + " Markdown line: " + md_line)
+			if line_number == 5002 {
+				info("\n\n" + strconv.Itoa(line_number) + " Markdown line: " + md_line)
 				info(strconv.Itoa(line_number) + " TeX line     : " + line)
 			}
-			
+
 			if in_table && line != "" {
 				if table_type == "simple" {
 					line = regexp.MustCompile(`\s{2,}`).ReplaceAllString(line, " & ") + "\\\\ "
@@ -776,7 +681,7 @@ func processLines(lines []string) {
 					line = regexp.MustCompile(`\|`).ReplaceAllString(line, " & ") + "\\\\ "
 				}
 			}
-
+			re_4 := regexp.MustCompile(`^\s{4,}(\-|1\.)`) // at least four spaces at the start of a line, followed by '-' or '1.'
 			if re_4.FindStringIndex(line) != nil {
 				addItem("", line)
 			} else {
@@ -866,11 +771,13 @@ func addGraphics(filename string) string {
 func addItem(key string, item string) {
 	// This function adds an item to a list. It implements three
 	// types: itemize, enumerate and description.
+	// FIXME: It seems unreasonably long and complex. Can I factor
+	// out the markdown code, or make into (one-use) functions?
 	e := ""
 	inList := false
-	re_k := regexp.MustCompile("^\\s+\\-|(\\d\\.)")           // First non-space item markers
-	re_4 := regexp.MustCompile("^\\s{4,}\\-|(\\d\\.)")        // At least four leading spaces
-	re_b := regexp.MustCompile("^\\[\\s([^\\s]+?)\\s\\]\\s+") // [] Brackets
+	re_k := regexp.MustCompile(`^\s+\-|(\d\.)`) // First non-space item markers
+
+	re_b := regexp.MustCompile(`^\[\s([^\s]+?)\s\]\s+`) // [] Brackets
 
 	//re_n := regexp.MustCompile("^\\s*\\d+\\.")
 
@@ -913,7 +820,11 @@ func addItem(key string, item string) {
 
 	// Implement Markdown's "four spaces rule" for auto-indentation.
 	this_indent_level := indent_level
+	re_4 := regexp.MustCompile(`^\s{4,}\-\s|^\s{4,}\d\.\s`) // At
+	// least four leading spaces followed by '- ' or '1. '
+	re_4 = regexp.MustCompile(`^\s{4,}(\-|1\.)`) // at least four spaces at the start of a line, followed by '-' or '1.'
 	pos := re_4.FindStringIndex(item)
+
 	if pos != nil {
 		// There are AT LEAST 4 spaces. If there are 8 or
 		// more, indent level  is two, and so on.
@@ -925,12 +836,16 @@ func addItem(key string, item string) {
 			this_indent_level = 2
 		} // Only allows three-level lists
 		// Trim the list marker, except for description item
+		debug("Adding list item: " + item)
 		if env != "description" {
 			item = item[pos[1]:len(item)]
 		}
+		debug("Item is now: " + item)
+
 	} else {
 		this_indent_level = 0
 	}
+
 	//info("Indent level is: " + strconv.Itoa(indent_level) )
 	// End Markdown-specific code
 
@@ -981,22 +896,22 @@ func addTeXlines(s string) {
 	if regexp.MustCompile(`^(\%)`).FindStringIndex(md_line) == nil && SlidesOnly == false {
 		// remove processing intructions, e.g. [no]
 		if re_nonMD.FindStringIndex == nil {
-			info("Found non-MD content:" + md_line)
+			info("Found non-Markdown content:" + md_line)
 		}
 		// FIXME: for some reason, some lines end up repeated
 		// in the MD file.  The condition below is a dirty
 		// hack until I can find the real reason
 		mdl := len(markdownLines)
-		if(mdl < 1) {
+		if mdl < 1 {
 			markdownLines = append(markdownLines, "\n")
 			mdl = len(markdownLines)
 		}
 
-		if markdownLines[mdl-1] != md_line + "\n" {
+		if markdownLines[mdl-1] != md_line+"\n" {
 			if regexp.MustCompile(`^%`).FindStringIndex(md_line) == nil &&
 				regexp.MustCompile(`^p`).FindStringIndex(md_line) == nil {
 				md_line = regexp.MustCompile(`^\[no\]`).ReplaceAllString(md_line, "")
-				markdownLines = append(markdownLines, md_line + "\n")
+				markdownLines = append(markdownLines, md_line+"\n")
 			}
 		}
 	}
@@ -1162,7 +1077,8 @@ func writeNotes(filename string, r chan bool) {
 	}
 	notesAuthor += "}\n\n"
 	notesTop := o.notesTeXPreamble + notesTitle + notesAuthor +
-		"\\lfoot{" + o.CourseCode + ", " + o.Date + "}\n" +
+		"\\lfoot{" + o.CourseCode + " (" +
+		strings.TrimSpace(o.Date) + ")}\n" +
 		//		"\\cfoot{page \\thepage}\n" +
 		"\\rfoot{" + o.LectureTitle + "}\n"
 	if o.Date != "" {
@@ -1182,15 +1098,14 @@ func writeNotes(filename string, r chan bool) {
 	f := strings.ToLower(fs[0]) + "-notes"
 	o.NotesFileName = f + ".tex"
 	writeOutput(o.NotesFileName, s)
-
-	if ( run_TeX ) {
-		info("====> Now formatting notes with TeX")		
+	if run_TeX {
+		info("====> Formatting notes with TeX")
 		res := runTeX(f, "notes")
 		if res {
 			flist := f + ".aux " + f + ".log " +
-				f + ".out " + f + ".run.xml "
+				f + ".out " + f + ".run.xml " + f + ".bcf"
 			if o.hasCitations {
-				flist += f + ".bbl " + f + ".blg "
+				flist += f + ".bbl " + f + ".blg " + f + ".bcf"
 			}
 			cleanUp(flist)
 		} else {
@@ -1198,6 +1113,8 @@ func writeNotes(filename string, r chan bool) {
 				" the notes.")
 			r <- false
 		}
+	} else {
+		debug("run_TeX is false?!?")
 	}
 	r <- true
 }
@@ -1251,14 +1168,14 @@ func writeSlides(f string, r chan bool) {
 	writeOutput(o.SlidesFileName, s)
 
 	if run_TeX {
-		info("====> Now formatting slides with TeX")		
+		info("====> Formatting slides with TeX")
 		res := runTeX(f, "slides")
 		if res {
 			flist := f + ".log " + f + ".aux " +
 				f + ".out " + f + ".nav " + f + ".snm " +
-				f + ".toc " + f + ".run.xml "
+				f + ".toc " + f + ".run.xml " + f + ".bcf"
 			if o.hasCitations {
-				flist += f + ".bbl " + f + ".blg "
+				flist += f + ".bbl " + f + ".blg " + f + ".bcf"
 			}
 			cleanUp(flist)
 		} else {
@@ -1266,6 +1183,8 @@ func writeSlides(f string, r chan bool) {
 				" the slides.")
 			r <- false
 		}
+	} else {
+		debug("run_TeX is false!?!")
 	}
 	r <- true
 }
@@ -1284,13 +1203,13 @@ func writeMD(filename string, r chan bool) {
 	if o.Author2 != "" {
 		notesAuthor += fmt.Sprintf("and %s", o.Author2)
 	}
-	notesTop := mdYAML + notesTitle + notesAuthor 
+	notesTop := mdYAML + notesTitle + notesAuthor
 	if o.Date != "" {
 		d := regexp.MustCompile(`[^\{]+\{([^\}]+)\}`).ReplaceAllString(o.Date, "$1")
-		notesTop += "\ndate: " + d 
+		notesTop += "\ndate: " + d
 	}
 	notesTop = notesTop + "bibliography: /home/john/Dropbox/Writing/bib/all-refs.bib\n\n---\n\n"
-	
+
 	popEnvs()
 	notesBottom := "# References"
 	s := notesTop + strings.Join(markdownLines, "") + notesBottom
@@ -1301,23 +1220,23 @@ func writeMD(filename string, r chan bool) {
 	f := strings.ToLower(fs[0]) + "-notes"
 	f_m := f + ".md"
 	f_h := f + ".html"
-	f_d := f + ".docx"
+	//f_d := f + ".docx"
 	writeOutput(f_m, s)
 	args_h := []string{"--standalone", "--include-in-header=/home/john/Dropbox/Writing/snp/style.css", "--from=markdown+link_attributes+simple_tables+pipe_tables+definition_lists", "--filter=pandoc-citeproc", "--output=" + f_h, f_m}
-	args_d := []string{ f_h, "--output=" + f_d}
+	args_d := []string{f_h, "--output=" + f_h}
 
 	res := true
-	fmt.Println("====> Formatting notes with pandoc")
+	info("====> Formatting notes with pandoc")
 	//info("pandoc " + strings.Join(args_h, " ") )
 	res = runProg("pandoc", args_h)
 	if res {
-		// info("pandoc " + strings.Join(args_d, " ") )
+		info("pandoc " + strings.Join(args_d, " ") )
 		res = runProg("pandoc", args_d)
 	} else {
-		fmt.Printf("Error! <====")
+		//fmt.Printf("====> Error running pandoc.\n")
 		res = false
 	}
-	r <- res 
+	r <- res
 }
 
 /*******************************************************************************
@@ -1350,7 +1269,7 @@ func runTeX(f string, ftype string) bool {
 		pb := "biber"
 		ab := []string{"--quiet", f}
 		runProg(pb, ab)
-		runProg(p, a )
+		runProg(p, a)
 		cleanUp(f + ".bcf")
 	}
 
@@ -1360,7 +1279,7 @@ func runTeX(f string, ftype string) bool {
 		t := o.nupTop + "{" + n + ".pdf}\n" + o.nupBottom
 		writeOutput(f, t)
 		a = []string{"-interaction=nonstopmode", f}
-		runProg(p, a )
+		runProg(p, a)
 
 		flist := n + "-2up.tex " + n + "-2up.aux " + n + "-2up.log "
 		cleanUp(flist)
@@ -1377,19 +1296,19 @@ func runTeX(f string, ftype string) bool {
 
 func runProg(p string, a []string) bool {
 	if Debug > 0 {
-		info("\nRunning '" + p + "' '" + strings.Join(a, " ") +"'" )
+		debug("\nRunning '" + p + "' '" + strings.Join(a, " ") + "'")
 	}
 
-	cmd := exec.Command(p, a... )
-	//fmt.Println("====> About to exec "+p)
+	cmd := exec.Command(p, a...)
+	debug("====> About to exec " + p)
 	output, err := cmd.CombinedOutput()
-	//fmt.Printf("execing of "+p+ " has completed\n")
+	debug("execing of " + p + " has completed\n")
 	if err != nil {
-		info(ErrorText + p + " did not complete successfully.")
+		info(ErrorText + p + " did not complete successfully")
 		if Debug > 0 {
 			fmt.Println("Debug is:", Debug)
 		}
-		if Debug >  0 {
+		if Debug > 0 {
 			info("Parameter to runProg p (program) is: " + p)
 			info("Parameter to runProg a (arg) is: " + strings.Join(a, " "))
 			fmt.Println("error message is: ", err)
@@ -1648,38 +1567,40 @@ func smart_punc(line string) string {
 	// ellipses, percentage signs and ampersands in the TeX-safe
 	// way.
 	// "Smart" punctuation, i.e. translate to TeX and escape TeX
-	re_el := regexp.MustCompile("\\.\\.\\.")    // ellipsis
-	re_qo := regexp.MustCompile("([\\s\\(])\"") // open quotation mark
-	re_qc := regexp.MustCompile("([^\"])\"")    // close quotation mark
-	re_pc := regexp.MustCompile("(\\d|\\?)\\%") // escape % FIXME: match anywhere except start of line.
-	re_ss := regexp.MustCompile(re_delim("^"))  // Superscript (in-text)
-
-
-	re_uri := regexp.MustCompile("http")  // detect URI
-	re_amp := regexp.MustCompile("\\&")   // escape &
-	//re_dol := regexp.MustCompile("\\$(?P<amt>\\d+(\\.\\d{2}))*[\\s\\.][^\\$]")   // escape $
-	re_dol := regexp.MustCompile(`\$(\d)`) // escape $
-
-	re_frac := regexp.MustCompile(`(\d+)/(\d+)`) // TeX-ify fraction
-
-	line = re_ss.ReplaceAllString(line, "\\textsuperscript{$1}")
-	line = re_qo.ReplaceAllString(line, "$1``")
-	line = re_qc.ReplaceAllString(line, "$1''")
+	re_el := regexp.MustCompile(`\.\.\.`) // ellipsis
 	line = re_el.ReplaceAllString(line, "\\ldots")
+
+	re_qo := regexp.MustCompile("([\\s\\(])\"") // open quotation mark
+	line = re_qo.ReplaceAllString(line, "$1``")
+
+	re_qc := regexp.MustCompile("([^\"])\"") // close quotation mark
+	line = re_qc.ReplaceAllString(line, "$1''")
+
+	re_pc := regexp.MustCompile("(\\d|\\?)\\%") // escape '%'. FIXME: match anywhere except start of line.
 	line = re_pc.ReplaceAllString(line, "$1\\%")
 
-	line = re_dol.ReplaceAllString(line, "\\$$1")
+	re_ss := regexp.MustCompile(re_delim("^")) // Superscript (in-text)
+	line = re_ss.ReplaceAllString(line, "\\textsuperscript{$1}")
 
+	//re_dol := regexp.MustCompile("\\$(?P<amt>\\d+(\\.\\d{2}))*[\\s\\.][^\\$]")   // escape $
+	re_dol := regexp.MustCompile(`\$(\d)`) // escape $
+	if re_dol.FindStringIndex(line) != nil {
+		debug("Found $: " + line)
+		line = re_dol.ReplaceAllString(line, "\\$$1")
+	}
+
+	re_frac := regexp.MustCompile(` (\d+)/(\d+) `) // TeX-ify fraction
 	line = re_frac.ReplaceAllString(line, "$\\frac{$1}{2}$")
 
+	re_amp := regexp.MustCompile("\\&")  // escape &  FIXME: breaks math array environment!
+	re_uri := regexp.MustCompile("http") // detect URI
 	if re_amp.FindStringIndex(line) != nil && re_uri.FindStringIndex(line) == nil {
-		if envStack[0] != "tabular" {
+		if envStack[0] != "tabular" && leave_alone != true { // Or array?
+			debug("Current environment: " + envStack[0])
 			line = re_amp.ReplaceAllString(line, " \\& ")
 		}
 	}
-
 	return (line)
-
 }
 
 func re_delim(delim string) string {
@@ -1689,37 +1610,43 @@ func re_delim(delim string) string {
 	return (s)
 }
 
-func makeColspec( cols [][]string ) string {
+func makeColspec(cols [][]string) string {
 	colspec := "[t]{"
-	for _, col := range(cols) {
-		//info("Column " + strconv.Itoa(i) + ":" + col[0])
+	//info("Cols: ")
+	//fmt.Printf("%v",cols)
+	//info("\n")
+	for _, col := range cols {
 		if regexp.MustCompile(`:-`).FindStringIndex(col[0]) != nil {
 			colspec = colspec + " l"
-		} else 	if regexp.MustCompile(`-:`).FindStringIndex(col[0]) != nil {
+		} else if regexp.MustCompile(`-:`).FindStringIndex(col[0]) != nil {
 			colspec = colspec + " r"
 		} else {
 			colspec = colspec + " l"
 		}
 	}
 	colspec = colspec + " }"
-	return( colspec )
+	return (colspec)
 }
 
-func processTables( line string ) {
+func processTables(line string) string {
 	// Process Markdown tables, both simple and pipe.
 	// Detect different types of Pandoc tables
-	re_simp := regexp.MustCompile(`(:*-{2,}:*)(?:\s{2,}|\n)`)
+	// Difficult because a line of dashes indicates a table, but
+	// the header information is in the previous line. Also, have
+	// to discard the line that contains the dashes!
+	re_simp := regexp.MustCompile(`(:*-{2,}:*)\s+`)
 	re_pipe := regexp.MustCompile(`^\|`)
 	re_blok := regexp.MustCompile(`^\+\-`)
 
+	line += " "
 	cols := [][]string{}
 	if re_simp.FindStringIndex(line) != nil {
 		info("Found simple table!")
-		table_type="simple"
+		table_type = "simple"
 		cols = re_simp.FindAllStringSubmatch(line, -1)
 	} else if re_pipe.FindStringIndex(line) != nil && table_type != "block" {
 		info("Found pipe table!")
-		table_type="pipe"
+		table_type = "pipe"
 		cols = regexp.MustCompile(`\|`).FindAllStringSubmatch(line, -1)
 	} else if re_blok.FindStringIndex(line) != nil {
 		// Could be the first OR last line of the table
@@ -1728,7 +1655,7 @@ func processTables( line string ) {
 			table_type = "none"
 		} else {
 			info(strconv.Itoa(line_number) + ": Found block table")
-			table_type="block"
+			table_type = "block"
 			cols = regexp.MustCompile(`\+`).FindAllStringSubmatch(line, -1)
 		}
 	}
@@ -1736,18 +1663,19 @@ func processTables( line string ) {
 	if cols_n > 0 {
 		in_table = true
 		info("Found table with " + strconv.Itoa(len(cols)) + " columns")
-		info(line)
+		debug(line)
 		colspec := makeColspec(cols)
-		debug("colspec: " + colspec)
+		info("colspec: " + colspec)
 		has_header := false
-		
+
 		// Remove the previous line from the TeX output file, because we need
 		// to re-process it. FIXME: true for simple, what about pipe and block?
 		header := ""
-		if table_type == "simple"  {
-			header = smart_punc(lines[line_number-1])
+		if table_type == "simple" {
+			header = smart_punc(lines[line_number-2])
 			notesTeXlines[len(notesTeXlines)-1] = ""
 			slidesTeXlines[len(slidesTeXlines)-1] = ""
+			debug("header:" + header)
 		} else {
 			// The header of a pipe or block table may be empty
 			if regexp.MustCompile(`^[\|\s]+$`).FindStringIndex(lines[line_number]) == nil {
@@ -1757,35 +1685,145 @@ func processTables( line string ) {
 				header = ""
 			}
 		}
-		
+
 		if header != "" {
 			has_header = true
 		} else {
 			has_header = false
 		}
-		
-		pushEnv("tabular",  colspec )
+
+		pushEnv("tabular", colspec)
 		if has_header {
 			if table_type == "simple" {
+				// FIXME: adds extra & at end of line (?)
 				header = regexp.MustCompile(`\s{2,}`).ReplaceAllString(header, " & ")
 			} else if table_type == "pipe" {
 				header = regexp.MustCompile(`\|`).ReplaceAllString(header, " & ")
 			} else if table_type == "block" {
 				header = regexp.MustCompile(`[\|]`).ReplaceAllString(header, " & ")
 			}
-			
+
 			addTeXlines(header)
 			addTeXlines("\\\\\n\\midrule\n")
 		}
 		// Now discard the line with --- indicating the table
+		debug("Discarding line: " + line)
 		line = "%" // Can't replace with a blank line: it will end the table env.
 	} else if in_table {
 		if regexp.MustCompile(`:-|-:`).FindStringIndex(line) != nil {
 			//info("Found pipe table column specification: '" + line + "'")
 			line = "%"
 		}
-		//info("The subsequent lines are: " + line)
+		debug("The subsequent lines are: " + line )
 	}
+	return(line)
+}
+
+func process_md(line string) string {
+	line = smart_punc(line)
+	// Set up regular expressions for line parsing
+	match_string := `([^\` + o.bold + `]+)`
+	bold_re := `\` + o.bold + `{2}` + match_string + `\` + o.bold + `{2}`
+	ital_re := `\` + o.bold + `{1}` + match_string + `\` + o.bold + `{1}`
+
+	// Markdown processing
+	// Emphasis
+	re_b := regexp.MustCompile(bold_re) // Bold
+	re_i := regexp.MustCompile(ital_re) // italics
+
+	// Links, URIs and images. FIXME: deal with ) in URI
+	re_g := regexp.MustCompile(`!\[(?P<text>[^\]]*)\](\((?P<path>[^\)]+)\))*(\{(?P<arguments>[^\}]*)\))*`) // graphics
+	// source: http://daringfireball.net/2010/07/improved_regex_for_matching_urls
+
+	re_uri := `(?i)\b((?:[a-z][\w-]+:(?:/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s!()\[\]{};:'",<>?«»“”‘’]))`
+
+	re_h := regexp.MustCompile(`\[(?P<text>[^\]]+)\]\((?P<uri>` + re_uri + `)\)`) // link
+
+	re_keyval := regexp.MustCompile(`(?P<key>\w+)\=(?P<value>[^,]+)`)
+	re_bogus := regexp.MustCompile(`align=center`)
+	found := false
+
+	// Scan line for Markdown markup
+	if re_b.FindStringIndex(line) != nil {
+		line = re_b.ReplaceAllString(line, "\\textbf{$1}")
+		found = true
+	}
+	if re_i.FindStringIndex(line) != nil {
+		line = re_i.ReplaceAllString(line, "\\textit{$1}")
+		found = true
+	}
+	if re_h.FindStringIndex(line) != nil {
+		line = re_h.ReplaceAllString(line, "\\href{$uri}{$text}")
+		found = true
+	}
+
+	// Process graphics links
+	if re_g.FindStringIndex(line) != nil {
+		// \\begin{center}\n  \\end{center}\n"
+		// FIXME: I need to remove invalid argument for includegraphics
+		md := map[string]string{}
+		n1 := re_g.SubexpNames()
+		r1 := re_g.FindAllStringSubmatch(line, -1)[0]
+		for i, n := range r1 {
+			if n1[i] == "arguments" && n != "" {
+				r2 := re_keyval.FindAllStringSubmatch(n, -1)
+				for _, pair := range r2 {
+					key := pair[1]
+					value := pair[2]
+					if key == "align" && value == "center" {
+						//info("Auto-centering")
+						//info("before: " + line)
+						line = re_bogus.ReplaceAllString(line, "")
+						//info("after: " + line)
+						pushEnv("center", "")
+					}
+
+				}
+			}
+			md[n1[i]] = n
+		}
+		line = re_g.ReplaceAllString(line, "\n\\includegraphics[$arguments]{$path}\n")
+		// FIXME: Dirty hack. Whatever the extension
+		// is, remove it and substitute PDF for
+		// TeX. But what if I really want to include a
+		// PNG?
+		line = regexp.MustCompile(`\.svg`).ReplaceAllString(line, ".pdf")
+		fmt.Println(line)
+		found = true
+	}
+
+	// No return value ?
+	processTables(line)
+	if regexp.MustCompile(`:*-{2,}\s+:*`).FindStringIndex(line) != nil {
+		debug("should be gone: " +line)
+		line = "%"
+	}
+
+	// Citations
+	re_p := regexp.MustCompile(`\[(?P<prefix>[^@]*)(?P<key>(@[^\[]+);*)+\s*(?P<suffix>[^\]]*)\]`) // Parenthesised citation
+	re_t := regexp.MustCompile(`@(?P<key>[\w\.]+)\s{0,1}(\[(?P<suffix>[^\}]+)\])*`)               //in-text citation
+	if re_p.FindStringIndex(line) != nil {
+		cites := parseCitations(line)
+		line = re_p.ReplaceAllString(line, "\\citep[$prefix][$suffix]{"+cites+"}")
+		o.hasCitations = true
+		found = true
+	} else {
+		if re_t.FindStringIndex(line) != nil {
+			cites := parseCitations(line)
+			line = re_t.ReplaceAllString(line, "\\citet[$suffix]{"+cites+"}")
+			o.hasCitations = true
+			found = true
+		}
+	}
+
+	if found {
+		if Debug > 0 {
+			debug("Formatted line:   " + line)
+		}
+		found = false
+	}
+	// End Markdown scanning
+	return line
 }
 
 // Local variables:
